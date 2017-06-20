@@ -615,11 +615,11 @@ int dec_rif_key_aes(const char* rifd, const char* keys, char* klicensee)
 {
   memset(klicensee, 0, 0x10);
 
-  char primary_table_key[0x10];
+  char primary_table_key_index[0x10];
 
-  memcpy(primary_table_key, rifd + 0x40, 0x10);
+  memcpy(primary_table_key_index, rifd + 0x40, 0x10);
   
-  int res = aes_decrypt_1D3AAF4(primary_table_key, 0x10, keys + 0x10, 0); //decrypt index with static key 2
+  int res = aes_decrypt_1D3AAF4(primary_table_key_index, 0x10, keys + 0x10, 0); //decrypt index with static key 2
   if(res < 0)
   {
     snprintf(sprintfBuffer, 256, "failed to decrypt primary key table index: %x\n", res);
@@ -629,7 +629,7 @@ int dec_rif_key_aes(const char* rifd, const char* keys, char* klicensee)
 
   FILE_GLOBAL_WRITE_LEN("decrypted primary key table index\n");
 
-  int index = primary_table_key[15] & 0x7F;
+  int index = primary_table_key_index[15] & 0x7F;
   
   char rif_key[0x10];
 
