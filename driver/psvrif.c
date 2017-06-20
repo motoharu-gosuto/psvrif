@@ -18,6 +18,8 @@
 #define SceSblAuthMgrForDriver_NID 0x4EB2B1BB
 #define SceNpDrmForDriver_NID 0xD84DC44A
 #define SceRtcForDriver_NID 0x351D827
+#define SceIofilemgrForDriver_NID 0x40FD29C7
+#define ScePfsMgrForKernel_NID 0xA067B56F
 
 typedef SceUInt64 SceRtcTick;
 
@@ -45,6 +47,75 @@ typedef struct dec_buffer
    char rif_data[0x70];     //0x60
    char unk1[0x30];         //0xD0
 }dec_buffer;
+
+typedef struct vfs_block_dev_info //size is 0x14
+{
+  char* vitaMount;
+  char* filesystem; // Some name, I guess it is filesystem
+  char* blockDevicePrimary;
+  char* blockDeviceSecondary; // can be 0
+  uint32_t vshMountId; //must be same as in mount_point_info
+}vfs_block_dev_info;
+
+typedef struct buffer_list
+{
+  SceUID mutex_id;
+  uint32_t unk_4;
+  uint32_t unk_8;
+  uint32_t unk_C;
+  uint32_t unk_10;
+  void* bcl;
+}buffer_list;
+
+typedef struct pfs_pmi_buffer_list_ctx
+{
+    buffer_list* blist;
+    uint32_t unk_4;
+    SceUID ScePfsPmi_mutex_id; // 0x08
+    char original_path[0x3F];  // 0xC
+    
+    char mount_point1[0x22]; // 0x4C - /%s
+    
+    char mount_point2[0x23];  // 0x6E - %s0:
+    
+    char unk_91;
+    
+    uint16_t type;   //0x92
+    uint16_t unk_94; //0x94 = 0
+    
+    char klicensee[0x10]; //0x96
+    
+    uint16_t unk_A6; // = 0
+    uint32_t unk_A8; // = 0
+    uint32_t unk_AC; // = 0
+    
+    SceUID ScePfsFilesDb_mutex_id; // 0xB0
+    
+    char unk_data1[0xBC]; // 0xB4
+    
+    uint32_t unk_170;
+    
+    char unk_data2[0x84]; // 0x174
+
+    vfs_block_dev_info block_dev; // 0x1F8
+
+    uint32_t unk_20C;
+    
+    //further fields are unknown
+} pfs_pmi_buffer_list_ctx;
+
+typedef struct vfs_mount_point_info_base
+{
+  char* unixMount;
+  char* originalPath;
+  uint32_t devMajor;
+  uint32_t devMinor;
+
+  char* filesystem;
+  pfs_pmi_buffer_list_ctx* bcl;
+  vfs_block_dev_info* blockDev1;
+  uint32_t unk_1C; //zero
+} vfs_mount_point_info_base;
 
 #pragma pack(pop)
 
@@ -836,6 +907,12 @@ SceUID npdrm_723322b5_hook_id = -1;
 tai_hook_ref_t npdrm_41daea12_hook_ref;
 SceUID npdrm_41daea12_hook_id = -1;
 
+tai_hook_ref_t iofilemgr_B62DE9A6_hook_ref;
+SceUID iofilemgr_B62DE9A6_hook_id = -1;
+
+tai_hook_ref_t pfsmgr_2d48aea2_hook_ref;
+SceUID pfsmgr_2d48aea2_hook_id = -1;
+
 //sceNpDrmGetRifVitaKeyForDriver
 int npdrm_723322b5_hook(char* rif_data, char* dec_rif_key, int* lic_type0, int* lic_type1, SceRtcTick* lic_start_time, SceRtcTick* lic_exp_time, int* rif_lic_flags)
 {
@@ -908,6 +985,51 @@ int npdrm_41daea12_hook(char* rif_key, int size0, char* primary_keys, int size1,
   return res;
 }
 
+//sceVfsMount
+int iofilemgr_B62DE9A6_hook(vfs_mount_point_info_base* mnt)
+{
+  int res = TAI_CONTINUE(int, iofilemgr_B62DE9A6_hook_ref, mnt);
+
+  if(mnt->devMajor == 3 && mnt->devMinor == 0x1001)
+  {
+    FILE_GLOBAL_WRITE_LEN("PFS sceVfsMount klicensee:\n");
+    if(mnt->bcl > 0)
+      print_bytes(mnt->bcl->klicensee, 0x10);
+    else
+      FILE_GLOBAL_WRITE_LEN("not initialized:\n");
+
+    FILE_GLOBAL_WRITE_LEN("PFS sceVfsMount originalPath:\n");
+    if(mnt->originalPath > 0)
+    {
+      snprintf(sprintfBuffer, 256, "%s\n", mnt->originalPath);
+      FILE_GLOBAL_WRITE_LEN(sprintfBuffer);
+    }
+  }
+
+  return res;
+}
+
+int pfsmgr_2d48aea2_hook(char* original_path, char* mount_point, char* klicensee, unsigned int type)
+{
+  int res = TAI_CONTINUE(int, pfsmgr_2d48aea2_hook_ref, original_path, mount_point, klicensee, type);
+
+  FILE_GLOBAL_WRITE_LEN("init hook:\n");
+  
+  if(mount_point > 0)
+  {
+    FILE_GLOBAL_WRITE_LEN("mount_point:\n");
+    snprintf(sprintfBuffer, 256, "%s\n", mount_point);
+    FILE_GLOBAL_WRITE_LEN(sprintfBuffer);
+  }
+
+  if(klicensee > 0)
+  {
+    print_bytes(klicensee, 0x10);
+  }
+
+  return res;
+}
+
 int initialize_hooks()
 {
   tai_module_info_t npdrm_info;
@@ -924,6 +1046,22 @@ int initialize_hooks()
     //npdrm_41daea12_hook_id = taiHookFunctionExportForKernel(KERNEL_PID, &npdrm_41daea12_hook_ref, "SceSblAuthMgr", SceSblAuthMgrForDriver_NID, 0x41daea12, npdrm_41daea12_hook);
   }
 
+  tai_module_info_t iofilemgr_info;
+  iofilemgr_info.size = sizeof(tai_module_info_t);
+  modres = taiGetModuleInfoForKernel(KERNEL_PID, "SceIofilemgr", &iofilemgr_info);
+  if (modres >= 0)
+  {
+    iofilemgr_B62DE9A6_hook_id = taiHookFunctionExportForKernel(KERNEL_PID, &iofilemgr_B62DE9A6_hook_ref, "SceIofilemgr", SceIofilemgrForDriver_NID, 0xB62DE9A6, iofilemgr_B62DE9A6_hook);
+  }
+
+  tai_module_info_t pfsmgr_info;
+  pfsmgr_info.size = sizeof(tai_module_info_t);
+  modres = taiGetModuleInfoForKernel(KERNEL_PID, "ScePfsMgr", &pfsmgr_info);
+  if (modres >= 0)
+  {
+    //pfsmgr_2d48aea2_hook_id = taiHookFunctionExportForKernel(KERNEL_PID, &pfsmgr_2d48aea2_hook_ref, "ScePfsMgr", ScePfsMgrForKernel_NID, 0x2d48aea2, pfsmgr_2d48aea2_hook);
+  }
+
   if(npdrm_723322b5_hook_id < 0)
   {
     snprintf(sprintfBuffer, 256, "failed to set npdrm_723322b5_hook: %x\n", npdrm_723322b5_hook_id);
@@ -933,6 +1071,18 @@ int initialize_hooks()
   if(npdrm_41daea12_hook_id < 0)
   {
     snprintf(sprintfBuffer, 256, "failed to set npdrm_41daea12_hook: %x\n", npdrm_41daea12_hook_id);
+    FILE_GLOBAL_WRITE_LEN(sprintfBuffer);
+  }
+
+  if(iofilemgr_B62DE9A6_hook_id < 0)
+  {
+    snprintf(sprintfBuffer, 256, "failed to set iofilemgr_B62DE9A6_hook: %x\n", iofilemgr_B62DE9A6_hook_id);
+    FILE_GLOBAL_WRITE_LEN(sprintfBuffer);
+  }
+
+  if(pfsmgr_2d48aea2_hook_id < 0)
+  {
+    snprintf(sprintfBuffer, 256, "failed to set pfsmgr_2d48aea2_hook: %x\n", pfsmgr_2d48aea2_hook_id);
     FILE_GLOBAL_WRITE_LEN(sprintfBuffer);
   }
 
@@ -946,6 +1096,12 @@ int deinitialize_hooks()
 
   if(npdrm_41daea12_hook_id >= 0)
     taiHookReleaseForKernel(npdrm_41daea12_hook_id, npdrm_41daea12_hook_ref);
+
+  if(iofilemgr_B62DE9A6_hook_id >= 0)
+    taiHookReleaseForKernel(iofilemgr_B62DE9A6_hook_id, iofilemgr_B62DE9A6_hook_ref);
+
+  if(pfsmgr_2d48aea2_hook_id >= 0)
+    taiHookReleaseForKernel(pfsmgr_2d48aea2_hook_id, pfsmgr_2d48aea2_hook_ref);
 
   return 0;
 }
